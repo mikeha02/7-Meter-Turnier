@@ -503,13 +503,13 @@ function renderModal() {
       </div>`;
   }
   return `<div class="modal-overlay" onclick="if(event.target===this) cancelModal()">
-    <div class="modal-box" onkeydown="handleModalKeydown(event)">
+    <div class="modal-box" id="active-modal-box">
       <div class="modal-title">${esc(homeLabel)} <span class="glm-vs">–</span> ${esc(awayLabel)}</div>
       ${inputPair(0)}${inputPair(1)}${inputPair(2)}
       ${overrideHtml}
       <div class="modal-actions">
         <button class="reset-btn" onclick="cancelModal()">Abbrechen</button>
-        <button class="copy-btn" onclick="saveModal()">Speichern</button>
+        <button class="copy-btn" id="modal-save-btn" onclick="saveModal()">Speichern</button>
       </div>
     </div>
   </div>`;
@@ -961,13 +961,21 @@ function render() {
 
 /* ---------- mutation handlers ---------- */
 let dbRef = null;
+function normalizeKoOverrides(ko) {
+  return { pairings: (ko && ko.pairings) || {}, winners: (ko && ko.winners) || {} };
+}
+
 function persist() {
   if (VIEW_ONLY || !state) return;
-  const payload = { teams: state.teams, groupResults: state.groupResults, koResults: state.koResults, koOverrides: state.koOverrides || { pairings: {}, winners: {} }, sponsors: state.sponsors || [], archive: state.archive || {} };
-  if (dbRef) {
-    dbRef.set(payload).catch(() => { connStatus = "error"; render(); });
-  } else {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
+  const payload = { teams: state.teams, groupResults: state.groupResults, koResults: state.koResults, koOverrides: normalizeKoOverrides(state.koOverrides), sponsors: state.sponsors || [], archive: state.archive || {} };
+  try {
+    if (dbRef) {
+      dbRef.set(payload).catch(() => { connStatus = "error"; render(); });
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    }
+  } catch (e) {
+    connStatus = "error";
   }
 }
 function updateSetScore(resultsKey, id, setIdx, side, val) {
@@ -997,37 +1005,48 @@ function openMatchModal(resultsKey, id, homeLabel, awayLabel, allowDraw) {
 }
 function saveModal() {
   if (!modalGame) return;
-  const { resultsKey, id } = modalGame;
-  const sets = [0, 1, 2].map(i => {
-    const h = document.getElementById(`modal-s${i}h`).value;
-    const a = document.getElementById(`modal-s${i}a`).value;
-    return { home: h === "" ? null : Math.max(0, parseInt(h, 10) || 0), away: a === "" ? null : Math.max(0, parseInt(a, 10) || 0) };
-  });
-  state[resultsKey][id] = { sets, updatedAt: Date.now() };
-  if (resultsKey === "koResults") {
-    const homeOverride = document.getElementById("modal-override-home").value;
-    const awayOverride = document.getElementById("modal-override-away").value;
-    const winnerOverride = document.getElementById("modal-override-winner").value;
-    state.koOverrides = state.koOverrides || { pairings: {}, winners: {} };
-    if (homeOverride || awayOverride) {
-      const p = {};
-      if (homeOverride) p.home = homeOverride;
-      if (awayOverride) p.away = awayOverride;
-      state.koOverrides.pairings[id] = p;
-    } else {
-      delete state.koOverrides.pairings[id];
+  try {
+    const { resultsKey, id } = modalGame;
+    const sets = [0, 1, 2].map(i => {
+      const h = document.getElementById(`modal-s${i}h`).value;
+      const a = document.getElementById(`modal-s${i}a`).value;
+      return { home: h === "" ? null : Math.max(0, parseInt(h, 10) || 0), away: a === "" ? null : Math.max(0, parseInt(a, 10) || 0) };
+    });
+    state[resultsKey][id] = { sets, updatedAt: Date.now() };
+    if (resultsKey === "koResults") {
+      const homeOverride = document.getElementById("modal-override-home").value;
+      const awayOverride = document.getElementById("modal-override-away").value;
+      const winnerOverride = document.getElementById("modal-override-winner").value;
+      state.koOverrides = normalizeKoOverrides(state.koOverrides);
+      if (homeOverride || awayOverride) {
+        const p = {};
+        if (homeOverride) p.home = homeOverride;
+        if (awayOverride) p.away = awayOverride;
+        state.koOverrides.pairings[id] = p;
+      } else {
+        delete state.koOverrides.pairings[id];
+      }
+      if (winnerOverride) state.koOverrides.winners[id] = winnerOverride;
+      else delete state.koOverrides.winners[id];
     }
-    if (winnerOverride) state.koOverrides.winners[id] = winnerOverride;
-    else delete state.koOverrides.winners[id];
+  } catch (e) {
+    console.error("Fehler beim Speichern:", e);
+  } finally {
+    modalGame = null;
+    persist();
+    render();
   }
-  modalGame = null;
-  persist(); render();
 }
 function cancelModal() { modalGame = null; render(); }
 function handleModalKeydown(e) {
-  if (e.key === "Enter") { e.preventDefault(); saveModal(); }
-  else if (e.key === "Escape") { e.preventDefault(); cancelModal(); }
+  if (!modalGame) return;
+  if (e.key === "Escape") { e.preventDefault(); cancelModal(); return; }
+  if (e.key === "Enter" && e.target && e.target.tagName !== "SELECT") {
+    e.preventDefault();
+    saveModal();
+  }
 }
+document.addEventListener("keydown", handleModalKeydown);
 function setTab(tab) { state.tab = tab; render(); }
 function resetAll() {
   if (VIEW_ONLY) return;
@@ -1095,7 +1114,7 @@ if (isConfigured) {
       const data = snapshot.val();
       const prevTab = state ? state.tab : "uebersicht";
       if (data) {
-        state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: data.koOverrides || { pairings: {}, winners: {} }, sponsors: data.sponsors || [], archive: data.archive || {}, tab: prevTab };
+        state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: normalizeKoOverrides(data.koOverrides), sponsors: data.sponsors || [], archive: data.archive || {}, tab: prevTab };
       } else {
         state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: prevTab };
         persist();
@@ -1111,7 +1130,7 @@ if (isConfigured) {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const data = JSON.parse(saved);
-      state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: data.koOverrides || { pairings: {}, winners: {} }, sponsors: data.sponsors || [], archive: data.archive || {}, tab: "uebersicht" };
+      state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: normalizeKoOverrides(data.koOverrides), sponsors: data.sponsors || [], archive: data.archive || {}, tab: "uebersicht" };
     } else state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: "uebersicht" };
   } catch (e) { state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: "uebersicht" }; }
   connStatus = "local";
