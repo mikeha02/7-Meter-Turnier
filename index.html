@@ -122,6 +122,10 @@
   .legal-text { font-size: 13px; line-height: 1.6; color: var(--ink); }
   .legal-text p { margin: 0 0 10px; }
   .legal-text a { color: var(--tealDeep); }
+  .override-box { background: var(--goldPale); border: 1px solid var(--gold); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .override-label { font-size: 11px; font-weight: 600; color: var(--gold); text-transform: uppercase; letter-spacing: 0.4px; margin: 0 0 6px; }
+  .override-select { width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 6px; border: 1px solid var(--line); font-family: inherit; margin-bottom: 6px; background: var(--surface); }
+  .override-badge { display: inline-block; font-size: 10px; font-weight: 600; color: var(--gold); background: var(--goldPale); border-radius: 10px; padding: 2px 7px; margin-left: 6px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -320,15 +324,23 @@ function resolveAll(standingsA, standingsB) {
   function resolveGame(id) {
     if (memo[id]) return memo[id];
     const g = koById[id];
-    const home = resolveSource(g.home), away = resolveSource(g.away);
+    const pairingOverride = (state.koOverrides && state.koOverrides.pairings && state.koOverrides.pairings[id]) || {};
+    const tById = teamsById();
+    const home = pairingOverride.home ? (tById[pairingOverride.home] || null) : resolveSource(g.home);
+    const away = pairingOverride.away ? (tById[pairingOverride.away] || null) : resolveSource(g.away);
     const allowDraw = false;
     const outcome = matchOutcome(getSets(state.koResults[id]), allowDraw);
-    let winner = null, loser = null;
-    if (home && away && outcome.status === "win") {
+    const winnerOverride = state.koOverrides && state.koOverrides.winners && state.koOverrides.winners[id];
+    let winner = null, loser = null, overridden = false;
+    if (winnerOverride && home && away) {
+      winner = winnerOverride === "home" ? home : away;
+      loser = winnerOverride === "home" ? away : home;
+      overridden = true;
+    } else if (home && away && outcome.status === "win") {
       winner = outcome.winner === "home" ? home : away;
       loser = outcome.winner === "home" ? away : home;
     }
-    memo[id] = { home, away, winner, loser, outcome };
+    memo[id] = { home, away, winner, loser, outcome, overridden, pairingOverridden: !!(pairingOverride.home || pairingOverride.away) };
     return memo[id];
   }
   KO_GAMES.forEach(g => resolveGame(g.id));
@@ -336,7 +348,7 @@ function resolveAll(standingsA, standingsB) {
 }
 
 function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
-function fieldLabel(g) { return g === "A" ? "Feld 1" : "Feld 2"; }
+function fieldLabel(g) { return g === "A" ? "Platz 1" : "Platz 2"; }
 function hasAnyGroupResult() {
   return Object.keys(state.groupResults).some(k => {
     const sets = getSets(state.groupResults[k]);
@@ -347,7 +359,7 @@ function shuffleGroups() {
   if (VIEW_ONLY) return;
   if (hasAnyGroupResult()) return;
   if (!requireAdmin()) return;
-  if (!confirm("Teams werden zufällig neu auf Feld 1 und Feld 2 verteilt. Fortfahren?")) return;
+  if (!confirm("Teams werden zufällig neu auf Platz 1 und Platz 2 verteilt. Fortfahren?")) return;
   const names = state.teams.map(t => t.name);
   for (let i = names.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -358,10 +370,10 @@ function shuffleGroups() {
 }
 
 function renderStandingsTable(rows, highlightUpTo) {
-  return `<table class="standings"><thead><tr><th>#</th><th>Team</th><th>S</th><th>U</th><th>N</th><th>Sätze</th><th>Pkt</th></tr></thead><tbody>` +
+  return `<table class="standings"><thead><tr><th>#</th><th>Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Sätze</th><th>Diff</th><th>Pkt</th></tr></thead><tbody>` +
     rows.map((r, i) => `<tr class="${i < highlightUpTo ? 'qualified' : ''}">
-      <td class="mono">${i + 1}</td><td>${esc(r.team.name)}</td><td>${r.s}</td><td>${r.u}</td><td>${r.n}</td>
-      <td class="mono">${r.setsW}:${r.setsL}</td><td class="mono">${r.pkt}</td>
+      <td class="mono">${i + 1}</td><td>${esc(r.team.name)}</td><td class="mono">${r.sp}</td><td>${r.s}</td><td>${r.u}</td><td>${r.n}</td>
+      <td class="mono">${r.setsW}:${r.setsL}</td><td class="mono">${r.setsW - r.setsL > 0 ? '+' : ''}${r.setsW - r.setsL}</td><td class="mono">${r.pkt}</td>
     </tr>`).join("") + `</tbody></table>`;
 }
 
@@ -413,6 +425,7 @@ function renderErgebnisseList(data) {
   return `<p class="sub" style="margin-bottom:14px">${done} von ${list.length} Gruppenspielen eingetragen</p><div class="game-list">` + list.map(g => {
     const homeName = tById[g.home].name, awayName = tById[g.away].name;
     const outcome = matchOutcome(getSets(state.groupResults[g.id]), true);
+    const sets = getSets(state.groupResults[g.id]);
     let statusText, statusClass;
     if (outcome.status === "unstarted") { statusText = "ausstehend"; statusClass = "pending"; }
     else if (outcome.status === "win") { statusText = `${outcome.setsHome}:${outcome.setsAway}`; statusClass = "win"; }
@@ -422,7 +435,7 @@ function renderErgebnisseList(data) {
       <div class="glm-meta">Spiel ${gameNumbers[g.id]} · ${g.field}</div>
       <div class="glm-row">
         <div class="glm-teams">${esc(homeName)} <span class="glm-vs">–</span> ${esc(awayName)}</div>
-        <span class="status ${statusClass}">${statusText}</span>
+        <span class="status ${statusClass}">${statusText} ${setDetail(sets)}</span>
       </div>
     </div>`;
   }).join("") + `</div>`;
@@ -436,9 +449,12 @@ function renderErgebnisseKoList(data) {
     const homeName = ready ? r.home.name : "wird ermittelt";
     const awayName = ready ? r.away.name : "wird ermittelt";
     let statusText, statusClass;
+    let sets = [];
     if (!ready) { statusText = "wird ermittelt"; statusClass = "pending"; }
+    else if (r.overridden) { statusText = `Sieger manuell: ${r.winner.name}`; statusClass = "win"; sets = getSets(state.koResults[g.id]); }
     else {
-      const outcome = matchOutcome(getSets(state.koResults[g.id]), false);
+      sets = getSets(state.koResults[g.id]);
+      const outcome = matchOutcome(sets, false);
       if (outcome.status === "unstarted") { statusText = "ausstehend"; statusClass = "pending"; }
       else if (outcome.status === "win") { statusText = `${outcome.setsHome}:${outcome.setsAway}`; statusClass = "win"; }
       else if (outcome.tiedDecider) { statusText = `${outcome.setsHome}:${outcome.setsAway} · kein Sieger`; statusClass = "pending"; }
@@ -446,10 +462,10 @@ function renderErgebnisseKoList(data) {
     }
     const clickAttr = ready ? `onclick="openMatchModal('koResults','${g.id}','${esc(homeName).replace(/'/g, "\\'")}','${esc(awayName).replace(/'/g, "\\'")}',false)"` : "";
     return `<div class="game-list-item ${ready ? '' : 'disabled'}" ${clickAttr}>
-      <div class="glm-meta">Spiel ${gameNumbers[g.id]} · ${esc(g.phase)}</div>
+      <div class="glm-meta">Spiel ${gameNumbers[g.id]} · ${esc(g.phase)} ${r.pairingOverridden ? '<span class="override-badge">Begegnung manuell</span>' : ''}</div>
       <div class="glm-row">
         <div class="glm-teams ${ready ? '' : 'placeholder'}">${esc(homeName)} <span class="glm-vs">–</span> ${esc(awayName)}</div>
-        <span class="status ${statusClass}">${statusText}</span>
+        <span class="status ${statusClass}">${statusText} ${ready ? setDetail(sets) : ""}</span>
       </div>
     </div>`;
   }).join("") + `</div>`;
@@ -468,10 +484,29 @@ function renderModal() {
       <input class="score-box" id="modal-s${i}a" type="number" min="0" value="${s.away ?? ''}">
     </div>`;
   }
+  let overrideHtml = "";
+  if (resultsKey === "koResults") {
+    const pairingOverride = (state.koOverrides && state.koOverrides.pairings && state.koOverrides.pairings[id]) || {};
+    const winnerOverride = (state.koOverrides && state.koOverrides.winners && state.koOverrides.winners[id]) || "";
+    const teamOptions = sel => `<option value="">(automatisch)</option>` + state.teams.map(t => `<option value="${t.id}" ${sel === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("");
+    overrideHtml = `
+      <div class="override-box">
+        <p class="override-label">Begegnung manuell festlegen (Notfall)</p>
+        <select id="modal-override-home" class="override-select">${teamOptions(pairingOverride.home)}</select>
+        <select id="modal-override-away" class="override-select">${teamOptions(pairingOverride.away)}</select>
+        <p class="override-label" style="margin-top:10px">Sieger manuell festlegen</p>
+        <select id="modal-override-winner" class="override-select">
+          <option value="">(automatisch nach Sätzen)</option>
+          <option value="home" ${winnerOverride === "home" ? "selected" : ""}>${esc(homeLabel)} gewinnt</option>
+          <option value="away" ${winnerOverride === "away" ? "selected" : ""}>${esc(awayLabel)} gewinnt</option>
+        </select>
+      </div>`;
+  }
   return `<div class="modal-overlay" onclick="if(event.target===this) cancelModal()">
     <div class="modal-box" onkeydown="handleModalKeydown(event)">
       <div class="modal-title">${esc(homeLabel)} <span class="glm-vs">–</span> ${esc(awayLabel)}</div>
       ${inputPair(0)}${inputPair(1)}${inputPair(2)}
+      ${overrideHtml}
       <div class="modal-actions">
         <button class="reset-btn" onclick="cancelModal()">Abbrechen</button>
         <button class="copy-btn" onclick="saveModal()">Speichern</button>
@@ -529,8 +564,8 @@ function buildGroupSchedule(roundsA, roundsB) {
     const ga = roundsA[r] || [], gb = roundsB[r] || [];
     const maxGames = Math.max(ga.length, gb.length);
     for (let gi = 0; gi < maxGames; gi++) {
-      if (ga[gi]) list.push({ id: `A-${r * perRoundA + gi}`, home: ga[gi][0], away: ga[gi][1], field: "Feld 1" });
-      if (gb[gi]) list.push({ id: `B-${r * perRoundB + gi}`, home: gb[gi][0], away: gb[gi][1], field: "Feld 2" });
+      if (ga[gi]) list.push({ id: `A-${r * perRoundA + gi}`, home: ga[gi][0], away: ga[gi][1], field: fieldLabel("A") });
+      if (gb[gi]) list.push({ id: `B-${r * perRoundB + gi}`, home: gb[gi][0], away: gb[gi][1], field: fieldLabel("B") });
     }
   }
   return list;
@@ -552,21 +587,22 @@ function buildTournamentData() {
   return { teamsA, teamsB, roundsA, roundsB, flatGamesA, flatGamesB, standingsA, standingsB, resolved, groupSchedule, gameNumbers };
 }
 
+function setDetail(sets) {
+  const parts = sets.filter(s => s.home != null && s.away != null).map(s => `${s.home}:${s.away}`);
+  return parts.length ? `<span class="set-detail">(${parts.join(", ")})</span>` : "";
+}
+
 function renderUebersicht(data) {
-  const { flatGamesA, flatGamesB, standingsA, standingsB, resolved } = data;
+  const { groupSchedule, standingsA, standingsB, resolved } = data;
   const items = [];
-  flatGamesA.forEach(g => {
+  groupSchedule.forEach(g => {
     const res = state.groupResults[g.id];
-    items.push({ id: g.id, home: teamsById()[g.home].name, away: teamsById()[g.away].name, sets: getSets(res), outcome: matchOutcome(getSets(res), true), updatedAt: (res && res.updatedAt) || 0, ready: true });
-  });
-  flatGamesB.forEach(g => {
-    const res = state.groupResults[g.id];
-    items.push({ id: g.id, home: teamsById()[g.home].name, away: teamsById()[g.away].name, sets: getSets(res), outcome: matchOutcome(getSets(res), true), updatedAt: (res && res.updatedAt) || 0, ready: true });
+    items.push({ id: g.id, home: teamsById()[g.home].name, away: teamsById()[g.away].name, location: g.field, sets: getSets(res), outcome: matchOutcome(getSets(res), true), updatedAt: (res && res.updatedAt) || 0, ready: true });
   });
   KO_GAMES.forEach(g => {
     const r = resolved[g.id];
     const ready = !!r.home && !!r.away;
-    items.push({ id: g.id, home: ready ? r.home.name : sourceLabel(g.home), away: ready ? r.away.name : sourceLabel(g.away), sets: getSets(state.koResults[g.id]), outcome: r.outcome, updatedAt: (state.koResults[g.id] && state.koResults[g.id].updatedAt) || 0, ready });
+    items.push({ id: g.id, home: ready ? r.home.name : sourceLabel(g.home), away: ready ? r.away.name : sourceLabel(g.away), location: g.phase, sets: getSets(state.koResults[g.id]), outcome: r.outcome, updatedAt: (state.koResults[g.id] && state.koResults[g.id].updatedAt) || 0, ready });
   });
 
   const recent = items.filter(it => it.outcome.status === "win" || it.outcome.status === "draw").sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
@@ -575,16 +611,11 @@ function renderUebersicht(data) {
   const groups = [["A", standingsA], ["B", standingsB]];
   const cur = groups[overviewIndex % groups.length];
 
-  function setDetail(sets) {
-    const parts = sets.filter(s => s.home != null && s.away != null).map(s => `${s.home}:${s.away}`);
-    return parts.length ? `<span class="set-detail">(${parts.join(", ")})</span>` : "";
-  }
-
   return `
     <div class="overview-grid">
       <div class="overview-card">
         <h3>Nächste anstehende Spiele</h3>
-        ${upcoming.length ? upcoming.map(it => `<div class="overview-item"><span>${esc(it.home)} – ${esc(it.away)}</span><span class="res">–:–</span></div>`).join("") : `<p class="empty-note">Keine offenen Spiele.</p>`}
+        ${upcoming.length ? upcoming.map(it => `<div class="overview-item"><span>${esc(it.home)} – ${esc(it.away)}<br><span class="set-detail">${esc(it.location)}</span></span><span class="res">–:–</span></div>`).join("") : `<p class="empty-note">Keine offenen Spiele.</p>`}
       </div>
       <div class="overview-card">
         <h3>${fieldLabel(cur[0])}</h3>
@@ -637,49 +668,44 @@ function bracketColumn(cardsHtml, pairUp, title) {
   return html;
 }
 
-function renderKoPhaseSection(cardFn) {
-  return `
-    <section class="phase-section">
-      <h2 class="phase-title">KO-Phase</h2>
-      <div class="bracket">
-        ${bracketColumn([cardFn("QF1"), cardFn("QF2"), cardFn("QF3"), cardFn("QF4")], true, "Viertelfinale")}
-        ${bracketColumn([cardFn("SF1"), cardFn("SF2")], true, "Halbfinale")}
-        ${bracketColumn([cardFn("FINALE")], false, "Finale")}
-      </div>
-    </section>`;
-}
+const LIVE_BRACKET_STRUCTURE = {
+  koPhase: { rounds: [
+    { title: "Viertelfinale", ids: ["QF1", "QF2", "QF3", "QF4"], pairUp: true },
+    { title: "Halbfinale", ids: ["SF1", "SF2"], pairUp: true },
+    { title: "Finale", ids: ["FINALE"], pairUp: false },
+  ] },
+  placements: [
+    { type: "row", title: "Spiel um Platz 3", ids: ["P3"] },
+    { type: "bracket", rounds: [
+      { ids: ["LR1", "LR2"], pairUp: true, title: "Zwischenrunde 5–8" },
+      { ids: ["P5"], pairUp: false, title: "Spiel um Platz 5" },
+    ] },
+    { type: "row", title: "Spiel um Platz 7", ids: ["P7"] },
+    { type: "row", title: "Spiel um Platz 9", ids: ["P9"] },
+    { type: "row", title: "Spiel um Platz 11", ids: ["P11"] },
+  ],
+};
 
-function renderPlatzierungsspieleSection(cardFn) {
-  return `
-    <section class="phase-section">
-      <h2 class="phase-title">Platzierungsspiele</h2>
-      <div class="ko-section">
-        <h3>Spiel um Platz 3</h3>
-        <div class="ko-row"><div class="ko-col">${cardFn("P3")}</div></div>
-      </div>
-      <div class="ko-section">
-        <div class="bracket">
-          ${bracketColumn([cardFn("LR1"), cardFn("LR2")], true, "Zwischenrunde 5–8")}
-          ${bracketColumn([cardFn("P5")], false, "Spiel um Platz 5")}
-        </div>
-      </div>
-      <div class="ko-section">
-        <h3>Spiel um Platz 7</h3>
-        <div class="ko-row"><div class="ko-col">${cardFn("P7")}</div></div>
-      </div>
-      <div class="ko-section">
-        <h3>Spiel um Platz 9</h3>
-        <div class="ko-row"><div class="ko-col">${cardFn("P9")}</div></div>
-      </div>
-      <div class="ko-section">
-        <h3>Spiel um Platz 11</h3>
-        <div class="ko-row"><div class="ko-col">${cardFn("P11")}</div></div>
-      </div>
-    </section>`;
+function renderStructuredBracket(structure, cardFn) {
+  let html = `<section class="phase-section"><h2 class="phase-title">KO-Phase</h2><div class="bracket">` +
+    structure.koPhase.rounds.map(r => bracketColumn(r.ids.map(cardFn), r.pairUp, r.title)).join("") +
+    `</div></section>`;
+  if (structure.placements) {
+    html += `<section class="phase-section"><h2 class="phase-title">Platzierungsspiele</h2>`;
+    structure.placements.forEach(sec => {
+      if (sec.type === "bracket") {
+        html += `<div class="ko-section"><div class="bracket">${sec.rounds.map(r => bracketColumn(r.ids.map(cardFn), r.pairUp, r.title)).join("")}</div></div>`;
+      } else {
+        html += `<div class="ko-section"><h3>${esc(sec.title)}</h3><div class="ko-row"><div class="ko-col">${sec.ids.map(cardFn).join("")}</div></div></div>`;
+      }
+    });
+    html += `</section>`;
+  }
+  return html;
 }
 
 function renderBaum(cardFn) {
-  return renderKoPhaseSection(cardFn) + renderPlatzierungsspieleSection(cardFn);
+  return renderStructuredBracket(LIVE_BRACKET_STRUCTURE, cardFn);
 }
 
 function renderEndstand(data) {
@@ -699,15 +725,17 @@ function renderEndstand(data) {
   </div>`;
 }
 
-function renderReadonlyMatchCard(homeLabel, awayLabel, sets, allowDraw) {
+function renderReadonlyMatchCard(homeLabel, awayLabel, sets, allowDraw, overrideInfo) {
   const outcome = matchOutcome(sets, allowDraw);
   let statusText, statusClass;
-  if (outcome.status === "win") { statusText = `${outcome.setsHome}:${outcome.setsAway}`; statusClass = "win"; }
+  if (overrideInfo && overrideInfo.winnerName) { statusText = `Sieger manuell: ${overrideInfo.winnerName}`; statusClass = "win"; }
+  else if (outcome.status === "win") { statusText = `${outcome.setsHome}:${outcome.setsAway}`; statusClass = "win"; }
   else if (outcome.status === "draw") { statusText = `${outcome.setsHome}:${outcome.setsAway} (unentschieden)`; statusClass = "draw"; }
   else { statusText = "–:–"; statusClass = "pending"; }
   const setsText = sets.filter(s => s.home != null && s.away != null).map(s => `${s.home}:${s.away}`).join(", ");
   return `<div class="match-card">
     <div class="match-teams"><span>${esc(homeLabel)}</span><span>${esc(awayLabel)}</span></div>
+    ${overrideInfo && overrideInfo.pairing ? `<div class="override-badge" style="margin-bottom:6px">Begegnung manuell</div>` : ""}
     <span class="status ${statusClass}">${statusText}</span>
     ${setsText ? `<div class="set-detail" style="margin-top:4px">(${setsText})</div>` : ""}
   </div>`;
@@ -718,7 +746,7 @@ function renderKoCardReadonly(id, resolved) {
   const ready = !!r.home && !!r.away;
   const homeLabel = ready ? r.home.name : sourceLabel(g.home);
   const awayLabel = ready ? r.away.name : sourceLabel(g.away);
-  return renderReadonlyMatchCard(homeLabel, awayLabel, getSets(state.koResults[id]), false);
+  return renderReadonlyMatchCard(homeLabel, awayLabel, getSets(state.koResults[id]), false, { pairing: r.pairingOverridden, winnerName: r.overridden ? r.winner.name : null });
 }
 
 function renderAlle(data) {
@@ -783,11 +811,17 @@ function deleteArchiveYear(year) {
 function renderArchivedSeason(year) {
   const snap = state.archive[year];
   if (!snap) return "";
-  const tableRows = grp => grp.map(r => ({ team: { name: r.name }, s: r.s, u: r.u, n: r.n, setsW: r.setsW, setsL: r.setsL, pkt: r.pkt }));
+  const tableRows = grp => grp.map(r => ({ team: { name: r.name }, sp: r.sp, s: r.s, u: r.u, n: r.n, setsW: r.setsW, setsL: r.setsL, pkt: r.pkt }));
   let html = `<div class="groups-row">
     <div class="group-block"><h2 class="group-title">${fieldLabel("A")}</h2>${renderStandingsTable(tableRows(snap.groups.A), 4)}</div>
     <div class="group-block"><h2 class="group-title">${fieldLabel("B")}</h2>${renderStandingsTable(tableRows(snap.groups.B), 4)}</div>
   </div>`;
+  if (snap.groupGames && snap.groupGames.length) {
+    html += `<div class="phase-section" style="margin-top:24px"><h2 class="phase-title">Gruppenspiele</h2><table class="allgames"><thead><tr><th>Nr.</th><th>Platz</th><th>Begegnung</th><th>Sätze</th></tr></thead><tbody>` +
+      snap.groupGames.map(g => `<tr><td class="mono">${g.number}</td><td style="color:var(--sub)">${esc(g.phase)}</td><td>${esc(g.home)} <span style="color:var(--sub)">–</span> ${esc(g.away)}</td>
+        <td class="mono" style="font-weight:600">${esc(g.result)}${g.sets ? ` <span class="set-detail">(${esc(g.sets)})</span>` : ""}</td></tr>`).join("") +
+      `</tbody></table></div>`;
+  }
   const byId = Object.fromEntries(snap.bracket.map(g => [g.id, g]));
   const card = id => {
     const g = byId[id];
@@ -798,13 +832,9 @@ function renderArchivedSeason(year) {
       ${g.sets ? `<div class="set-detail" style="margin-top:4px">(${esc(g.sets)})</div>` : ""}
     </div>`;
   };
-  const structure = snap.bracketStructure || { rounds: [
-    { title: "Viertelfinale", ids: ["QF1", "QF2", "QF3", "QF4"], pairUp: true },
-    { title: "Halbfinale", ids: ["SF1", "SF2"], pairUp: true },
-    { title: "Finale", ids: ["FINALE"], pairUp: false },
-  ] };
-  const cols = structure.rounds.map(r => bracketColumn(r.ids.map(card), r.pairUp, r.title)).join("");
-  html += `<div style="margin-top:24px"><section class="phase-section"><h2 class="phase-title">KO-Phase</h2><div class="bracket">${cols}</div></section></div>`;
+  const rawStructure = snap.bracketStructure;
+  const structure = !rawStructure ? LIVE_BRACKET_STRUCTURE : (rawStructure.koPhase ? rawStructure : { koPhase: rawStructure });
+  html += `<div style="margin-top:24px">${renderStructuredBracket(structure, card)}</div>`;
   html += `<div class="phase-section"><h2 class="phase-title">Endstand</h2><div class="final-table" style="max-width:360px">` +
     snap.placements.map(p => `<div class="final-row ${p.rank <= 3 ? 'top3' : ''}"><span class="mono">${p.rank}.</span><span class="name ${p.name ? '' : 'empty'}">${p.name ? esc(p.name) : 'wird ermittelt'}</span></div>`).join("") +
     `</div></div>`;
@@ -813,20 +843,27 @@ function renderArchivedSeason(year) {
 
 function buildArchiveSnapshot() {
   const data = buildTournamentData();
-  const slimStandings = rows => rows.map(r => ({ name: r.team.name, s: r.s, u: r.u, n: r.n, setsW: r.setsW, setsL: r.setsL, pkt: r.pkt }));
-  const bracketStructure = { rounds: [
-    { title: "Viertelfinale", ids: ["QF1", "QF2", "QF3", "QF4"], pairUp: true },
-    { title: "Halbfinale", ids: ["SF1", "SF2"], pairUp: true },
-    { title: "Finale", ids: ["FINALE"], pairUp: false },
-  ] };
-  const koPhaseIds = bracketStructure.rounds.flatMap(r => r.ids);
-  const bracket = KO_GAMES.filter(g => koPhaseIds.includes(g.id)).map(g => {
+  const slimStandings = rows => rows.map(r => ({ name: r.team.name, sp: r.sp, s: r.s, u: r.u, n: r.n, setsW: r.setsW, setsL: r.setsL, pkt: r.pkt }));
+  const bracketStructure = JSON.parse(JSON.stringify(LIVE_BRACKET_STRUCTURE));
+  const bracket = KO_GAMES.map(g => {
     const r = data.resolved[g.id];
     const ready = !!r.home && !!r.away;
     const sets = getSets(state.koResults[g.id]);
     const setsText = sets.filter(s => s.home != null && s.away != null).map(s => `${s.home}:${s.away}`).join(", ");
-    const result = r.outcome.status === "win" ? `${r.outcome.setsHome}:${r.outcome.setsAway}` : "–:–";
+    let result = "–:–";
+    if (r.overridden) result = `Sieger manuell: ${r.winner.name}`;
+    else if (r.outcome.status === "win") result = `${r.outcome.setsHome}:${r.outcome.setsAway}`;
     return { id: g.id, phase: g.phase, home: ready ? r.home.name : sourceLabel(g.home), away: ready ? r.away.name : sourceLabel(g.away), result, sets: setsText };
+  });
+  const groupGames = data.groupSchedule.map(g => {
+    const res = state.groupResults[g.id];
+    const sets = getSets(res);
+    const outcome = matchOutcome(sets, true);
+    const setsText = sets.filter(s => s.home != null && s.away != null).map(s => `${s.home}:${s.away}`).join(", ");
+    let result = "–:–";
+    if (outcome.status === "win") result = `${outcome.setsHome}:${outcome.setsAway}`;
+    else if (outcome.status === "draw") result = `${outcome.setsHome}:${outcome.setsAway} (unentschieden)`;
+    return { id: g.id, number: data.gameNumbers[g.id], phase: g.field, home: teamsById()[g.home].name, away: teamsById()[g.away].name, result, sets: setsText };
   });
   const placesFinal = [
     [1, data.resolved.FINALE.winner], [2, data.resolved.FINALE.loser],
@@ -837,7 +874,7 @@ function buildArchiveSnapshot() {
     [11, data.resolved.P11.winner], [12, data.resolved.P11.loser],
   ];
   const placements = placesFinal.map(([rank, team]) => ({ rank, name: team ? team.name : null }));
-  return { groups: { A: slimStandings(data.standingsA), B: slimStandings(data.standingsB) }, bracket, bracketStructure, placements };
+  return { groups: { A: slimStandings(data.standingsA), B: slimStandings(data.standingsB) }, groupGames, bracket, bracketStructure, placements };
 }
 
 function archiveSeason() {
@@ -852,6 +889,7 @@ function archiveSeason() {
   state.teams = defaultTeams();
   state.groupResults = {};
   state.koResults = {};
+  state.koOverrides = { pairings: {}, winners: {} };
   persist(); render();
 }
 
@@ -871,7 +909,7 @@ function render() {
   let content = "";
   if (state.tab === "uebersicht") content = renderUebersicht(data);
   else if (state.tab === "gruppen") {
-    content = `${!VIEW_ONLY && !hasAnyGroupResult() ? `<div style="margin-bottom:16px"><button class="copy-btn" onclick="shuffleGroups()">Gruppen mischen</button><p class="sub" style="margin-top:6px">Verteilt die Teams zufällig auf Feld 1 und Feld 2. Nur möglich, solange noch kein Ergebnis eingetragen wurde.</p></div>` : ""}<div class="groups-row">
+    content = `${!VIEW_ONLY && !hasAnyGroupResult() ? `<div style="margin-bottom:16px"><button class="copy-btn" onclick="shuffleGroups()">Gruppen mischen</button><p class="sub" style="margin-top:6px">Verteilt die Teams zufällig auf Platz 1 und Platz 2. Nur möglich, solange noch kein Ergebnis eingetragen wurde.</p></div>` : ""}<div class="groups-row">
       ${renderGroupStandingsBlock("A", data.teamsA, data.standingsA)}
       ${renderGroupStandingsBlock("B", data.teamsB, data.standingsB)}
     </div>`;
@@ -925,7 +963,7 @@ function render() {
 let dbRef = null;
 function persist() {
   if (VIEW_ONLY || !state) return;
-  const payload = { teams: state.teams, groupResults: state.groupResults, koResults: state.koResults, sponsors: state.sponsors || [], archive: state.archive || {} };
+  const payload = { teams: state.teams, groupResults: state.groupResults, koResults: state.koResults, koOverrides: state.koOverrides || { pairings: {}, winners: {} }, sponsors: state.sponsors || [], archive: state.archive || {} };
   if (dbRef) {
     dbRef.set(payload).catch(() => { connStatus = "error"; render(); });
   } else {
@@ -966,6 +1004,22 @@ function saveModal() {
     return { home: h === "" ? null : Math.max(0, parseInt(h, 10) || 0), away: a === "" ? null : Math.max(0, parseInt(a, 10) || 0) };
   });
   state[resultsKey][id] = { sets, updatedAt: Date.now() };
+  if (resultsKey === "koResults") {
+    const homeOverride = document.getElementById("modal-override-home").value;
+    const awayOverride = document.getElementById("modal-override-away").value;
+    const winnerOverride = document.getElementById("modal-override-winner").value;
+    state.koOverrides = state.koOverrides || { pairings: {}, winners: {} };
+    if (homeOverride || awayOverride) {
+      const p = {};
+      if (homeOverride) p.home = homeOverride;
+      if (awayOverride) p.away = awayOverride;
+      state.koOverrides.pairings[id] = p;
+    } else {
+      delete state.koOverrides.pairings[id];
+    }
+    if (winnerOverride) state.koOverrides.winners[id] = winnerOverride;
+    else delete state.koOverrides.winners[id];
+  }
   modalGame = null;
   persist(); render();
 }
@@ -979,7 +1033,7 @@ function resetAll() {
   if (VIEW_ONLY) return;
   if (!requireAdmin()) return;
   if (!confirm("Wirklich alle Ergebnisse und Teamnamen zurücksetzen?")) return;
-  state = { ...state, teams: defaultTeams(), groupResults: {}, koResults: {} };
+  state = { ...state, teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} } };
   persist(); render();
 }
 function generateRefereePdf() {
@@ -1041,9 +1095,9 @@ if (isConfigured) {
       const data = snapshot.val();
       const prevTab = state ? state.tab : "uebersicht";
       if (data) {
-        state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, sponsors: data.sponsors || [], archive: data.archive || {}, tab: prevTab };
+        state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: data.koOverrides || { pairings: {}, winners: {} }, sponsors: data.sponsors || [], archive: data.archive || {}, tab: prevTab };
       } else {
-        state = { teams: defaultTeams(), groupResults: {}, koResults: {}, sponsors: [], archive: {}, tab: prevTab };
+        state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: prevTab };
         persist();
       }
       connStatus = "connected";
@@ -1057,9 +1111,9 @@ if (isConfigured) {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const data = JSON.parse(saved);
-      state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, sponsors: data.sponsors || [], archive: data.archive || {}, tab: "uebersicht" };
-    } else state = { teams: defaultTeams(), groupResults: {}, koResults: {}, sponsors: [], archive: {}, tab: "uebersicht" };
-  } catch (e) { state = { teams: defaultTeams(), groupResults: {}, koResults: {}, sponsors: [], archive: {}, tab: "uebersicht" }; }
+      state = { teams: data.teams || defaultTeams(), groupResults: data.groupResults || {}, koResults: data.koResults || {}, koOverrides: data.koOverrides || { pairings: {}, winners: {} }, sponsors: data.sponsors || [], archive: data.archive || {}, tab: "uebersicht" };
+    } else state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: "uebersicht" };
+  } catch (e) { state = { teams: defaultTeams(), groupResults: {}, koResults: {}, koOverrides: { pairings: {}, winners: {} }, sponsors: [], archive: {}, tab: "uebersicht" }; }
   connStatus = "local";
   render();
 }
