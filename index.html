@@ -99,8 +99,8 @@
   .modal-box { background: var(--surface); border-radius: 14px; padding: 22px; width: 320px; max-width: 100%; }
   .modal-title { font-size: 15px; font-weight: 500; margin-bottom: 14px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  .sponsor-slide { display: flex; align-items: center; justify-content: center; height: 130px; }
-  .sponsor-slide img { max-height: 100%; max-width: 100%; object-fit: contain; }
+  .sponsor-slide { display: flex; align-items: center; justify-content: center; height: 260px; width: 100%; }
+  .sponsor-slide img { max-height: 100%; max-width: 100%; width: 100%; height: 100%; object-fit: contain; }
   .sponsor-thumb { position: relative; }
   .sponsor-thumb img { height: 40px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); padding: 4px; }
   .sponsor-thumb button { position: absolute; top: -6px; right: -6px; background: var(--red); color: #fff; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; line-height: 1; cursor: pointer; }
@@ -117,6 +117,11 @@
   .game-list-item.disabled { cursor: default; opacity: 0.65; }
   .game-list-item.disabled:hover { border-color: var(--line); }
   .glm-teams.placeholder { font-style: italic; color: var(--sub); }
+  .site-footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); text-align: center; }
+  .footer-link { background: none; border: none; color: var(--sub); text-decoration: underline; cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
+  .legal-text { font-size: 13px; line-height: 1.6; color: var(--ink); }
+  .legal-text p { margin: 0 0 10px; }
+  .legal-text a { color: var(--tealDeep); }
 </style>
 </head>
 <body>
@@ -127,10 +132,10 @@
    Erst eintragen, wenn geteilte Speicherung gewünscht ist.
    ============================================================ */
 const firebaseConfig = {
-  apiKey: "AIzaSyCR3-3K2HHdPpwmnbMkqzZxtoiaooYRmWY",
-  authDomain: "tvspaichingen-7meter.firebaseapp.com",
-  databaseURL: "https://tvspaichingen-7meter-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "tvspaichingen-7meter",
+  apiKey: "DEIN_API_KEY",
+  authDomain: "DEIN_PROJEKT.firebaseapp.com",
+  databaseURL: "https://DEIN_PROJEKT-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "DEIN_PROJEKT",
 };
 const DB_PATH = "turnier-2026";
 /* ============================================================ */
@@ -144,7 +149,7 @@ const RO = VIEW_ONLY ? "disabled" : "";
    ADMIN-PASSWORT — hier euer eigenes Passwort eintragen.
    Wird nur beim Bearbeiten (nicht beim reinen Ansehen) abgefragt.
    ============================================================ */
-const ADMIN_PASSWORD = "tvspaichingen";
+const ADMIN_PASSWORD = "TVSpaichingen1863";
 const ADMIN_SESSION_KEY = "turnier-admin-unlocked";
 function requireAdmin() {
   if (VIEW_ONLY) return false;
@@ -268,6 +273,8 @@ function matchOutcome(sets, allowDraw) {
   }
   if (entered < 2) return { status: "unstarted", setsHome: home, setsAway: away };
   if (entered < 3) return { status: "pending", setsHome: home, setsAway: away };
+  if (home > away) return { status: "win", winner: "home", setsHome: home, setsAway: away };
+  if (away > home) return { status: "win", winner: "away", setsHome: home, setsAway: away };
   if (allowDraw) return { status: "draw", setsHome: home, setsAway: away };
   return { status: "pending", tiedDecider: true, setsHome: home, setsAway: away };
 }
@@ -392,22 +399,16 @@ function renderMatchCard(resultsKey, id, homeLabel, awayLabel, ready, allowDraw)
 }
 
 function renderGroupStandingsBlock(label, teamsList, standings) {
+  const nameInputs = VIEW_ONLY ? "" : `<div class="team-inputs">` + teamsList.map(t => `<input value="${esc(t.name)}" ${RO} onchange="updateTeamName('${t.id}',this.value)">`).join("") + `</div>`;
   return `<div class="group-block">
     <h2 class="group-title">${fieldLabel(label)}</h2>
-    <div class="team-inputs">` +
-    teamsList.map(t => `<input value="${esc(t.name)}" ${RO} onchange="updateTeamName('${t.id}',this.value)">`).join("") +
-    `</div>${renderStandingsTable(standings, 4)}</div>`;
+    ${nameInputs}${renderStandingsTable(standings, 4)}</div>`;
 }
 
 function renderErgebnisseList(data) {
-  const { roundsA, roundsB } = data;
+  const { groupSchedule, gameNumbers } = data;
   const tById = teamsById();
-  const list = [];
-  const maxRounds = Math.max(roundsA.length, roundsB.length);
-  for (let r = 0; r < maxRounds; r++) {
-    if (roundsA[r]) roundsA[r].forEach((pair, gi) => list.push({ id: `A-${r * roundsA[r].length + gi}`, home: pair[0], away: pair[1], field: "Feld 1" }));
-    if (roundsB[r]) roundsB[r].forEach((pair, gi) => list.push({ id: `B-${r * roundsB[r].length + gi}`, home: pair[0], away: pair[1], field: "Feld 2" }));
-  }
+  const list = groupSchedule;
   const done = list.filter(g => { const o = matchOutcome(getSets(state.groupResults[g.id]), true); return o.status === "win" || o.status === "draw"; }).length;
   return `<p class="sub" style="margin-bottom:14px">${done} von ${list.length} Gruppenspielen eingetragen</p><div class="game-list">` + list.map(g => {
     const homeName = tById[g.home].name, awayName = tById[g.away].name;
@@ -418,7 +419,7 @@ function renderErgebnisseList(data) {
     else if (outcome.status === "draw") { statusText = `${outcome.setsHome}:${outcome.setsAway} (unentschieden)`; statusClass = "draw"; }
     else { statusText = `${outcome.setsHome}:${outcome.setsAway} · Satz 3 nötig`; statusClass = "pending"; }
     return `<div class="game-list-item" onclick="openMatchModal('groupResults','${g.id}','${esc(homeName).replace(/'/g, "\\'")}','${esc(awayName).replace(/'/g, "\\'")}',true)">
-      <div class="glm-meta">${g.field}</div>
+      <div class="glm-meta">Spiel ${gameNumbers[g.id]} · ${g.field}</div>
       <div class="glm-row">
         <div class="glm-teams">${esc(homeName)} <span class="glm-vs">–</span> ${esc(awayName)}</div>
         <span class="status ${statusClass}">${statusText}</span>
@@ -428,7 +429,7 @@ function renderErgebnisseList(data) {
 }
 
 function renderErgebnisseKoList(data) {
-  const { resolved } = data;
+  const { resolved, gameNumbers } = data;
   return `<div class="game-list">` + KO_GAMES.map(g => {
     const r = resolved[g.id];
     const ready = !!r.home && !!r.away;
@@ -445,7 +446,7 @@ function renderErgebnisseKoList(data) {
     }
     const clickAttr = ready ? `onclick="openMatchModal('koResults','${g.id}','${esc(homeName).replace(/'/g, "\\'")}','${esc(awayName).replace(/'/g, "\\'")}',false)"` : "";
     return `<div class="game-list-item ${ready ? '' : 'disabled'}" ${clickAttr}>
-      <div class="glm-meta">${esc(g.phase)}</div>
+      <div class="glm-meta">Spiel ${gameNumbers[g.id]} · ${esc(g.phase)}</div>
       <div class="glm-row">
         <div class="glm-teams ${ready ? '' : 'placeholder'}">${esc(homeName)} <span class="glm-vs">–</span> ${esc(awayName)}</div>
         <span class="status ${statusClass}">${statusText}</span>
@@ -479,11 +480,60 @@ function renderModal() {
   </div>`;
 }
 
+let legalModal = null;
+function openLegal(type) { legalModal = type; render(); }
+function closeLegal() { legalModal = null; render(); }
+
+function renderLegalModal() {
+  if (!legalModal) return "";
+  const impressum = `
+    <p><strong>Angaben gemäß § 5 DDG</strong></p>
+    <p>Mike Hafner<br>Lupfenstraße 10<br>78549 Spaichingen</p>
+    <p>E-Mail: <a href="mailto:7-meter-turnier@tvspaichingen.net">7-meter-turnier@tvspaichingen.net</a></p>
+    <p>Zweite Mannschaft TV Spaichingen</p>`;
+  const datenschutz = `
+    <p><strong>Datenschutzerklärung</strong></p>
+    <p>Diese Website wird ohne eigene Cookies und ohne eigenes Tracking betrieben. Es werden folgende externe Dienste eingebunden, die beim Aufruf der Seite technisch bedingt Daten (u. a. die IP-Adresse) an die jeweiligen Anbieter übertragen können:</p>
+    <p><strong>Google Fonts</strong> (Google Ireland Limited) – zur Darstellung der Schriftarten.<br>
+    <strong>Google Firebase</strong> (Google Ireland Limited) – falls von den Betreibern für die geteilte Ergebnis-Speicherung eingerichtet.<br>
+    <strong>jsDelivr / cdnjs</strong> – zum Nachladen technischer Programmbibliotheken (u. a. für die PDF-Erstellung).<br>
+    <strong>QR-Server (goQR.me)</strong> – zur Erzeugung des QR-Codes im Reiter "Teilen".</p>
+    <p>Von den Nutzern selbst eingegebene Daten (z. B. Teamnamen, Spielergebnisse) werden ausschließlich zur Durchführung des Turniers verwendet und nicht an Dritte weitergegeben.</p>
+    <p>Fragen zum Datenschutz richten Sie bitte an: <a href="mailto:7-meter-turnier@tvspaichingen.net">7-meter-turnier@tvspaichingen.net</a></p>`;
+  const title = legalModal === "impressum" ? "Impressum" : "Datenschutz";
+  const body = legalModal === "impressum" ? impressum : datenschutz;
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeLegal()">
+    <div class="modal-box" style="width:420px;max-height:80vh;overflow-y:auto" onkeydown="if(event.key==='Escape') closeLegal()">
+      <div class="modal-title">${title}</div>
+      <div class="legal-text">${body}</div>
+      <div class="modal-actions">
+        <button class="copy-btn" onclick="closeLegal()">Schließen</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderKoCard(id, resolved) {
   const g = koById[id];
   const r = resolved[id];
   const ready = !!r.home && !!r.away;
   return renderMatchCard("koResults", id, ready ? r.home.name : sourceLabel(g.home), ready ? r.away.name : sourceLabel(g.away), ready, false);
+}
+
+function buildGroupSchedule(roundsA, roundsB) {
+  const list = [];
+  const perRoundA = roundsA[0] ? roundsA[0].length : 0;
+  const perRoundB = roundsB[0] ? roundsB[0].length : 0;
+  const maxRounds = Math.max(roundsA.length, roundsB.length);
+  for (let r = 0; r < maxRounds; r++) {
+    const ga = roundsA[r] || [], gb = roundsB[r] || [];
+    const maxGames = Math.max(ga.length, gb.length);
+    for (let gi = 0; gi < maxGames; gi++) {
+      if (ga[gi]) list.push({ id: `A-${r * perRoundA + gi}`, home: ga[gi][0], away: ga[gi][1], field: "Feld 1" });
+      if (gb[gi]) list.push({ id: `B-${r * perRoundB + gi}`, home: gb[gi][0], away: gb[gi][1], field: "Feld 2" });
+    }
+  }
+  return list;
 }
 
 function buildTournamentData() {
@@ -495,7 +545,11 @@ function buildTournamentData() {
   const standingsA = computeStandings(flatGamesA, teamsA, state.groupResults);
   const standingsB = computeStandings(flatGamesB, teamsB, state.groupResults);
   const resolved = resolveAll(standingsA, standingsB);
-  return { teamsA, teamsB, roundsA, roundsB, flatGamesA, flatGamesB, standingsA, standingsB, resolved };
+  const groupSchedule = buildGroupSchedule(roundsA, roundsB);
+  const gameNumbers = {};
+  groupSchedule.forEach((g, i) => { gameNumbers[g.id] = i + 1; });
+  KO_GAMES.forEach((g, i) => { gameNumbers[g.id] = groupSchedule.length + i + 1; });
+  return { teamsA, teamsB, roundsA, roundsB, flatGamesA, flatGamesB, standingsA, standingsB, resolved, groupSchedule, gameNumbers };
 }
 
 function renderUebersicht(data) {
@@ -528,20 +582,20 @@ function renderUebersicht(data) {
 
   return `
     <div class="overview-grid">
-      <div class="overview-card" style="align-self:start">
-        <h3>Letzte 5 Ergebnisse</h3>
-        ${recent.length ? recent.map(it => `<div class="overview-item"><span>${esc(it.home)} – ${esc(it.away)}</span><span class="res">${it.outcome.status === 'draw' ? `${it.outcome.setsHome}:${it.outcome.setsAway}` : it.outcome.setsHome + ':' + it.outcome.setsAway} ${setDetail(it.sets)}</span></div>`).join("") : `<p class="empty-note">Noch keine Ergebnisse eingetragen.</p>`}
-      </div>
       <div class="overview-card">
         <h3>Nächste anstehende Spiele</h3>
         ${upcoming.length ? upcoming.map(it => `<div class="overview-item"><span>${esc(it.home)} – ${esc(it.away)}</span><span class="res">–:–</span></div>`).join("") : `<p class="empty-note">Keine offenen Spiele.</p>`}
       </div>
-      ${renderSponsorArea()}
       <div class="overview-card">
         <h3>${fieldLabel(cur[0])}</h3>
         ${renderStandingsTable(cur[1], 4)}
         <div class="rotator-dots">${groups.map((g, i) => `<span class="${i === overviewIndex % groups.length ? 'active' : ''}"></span>`).join("")}</div>
       </div>
+      <div class="overview-card" style="align-self:start">
+        <h3>Letzte 5 Ergebnisse</h3>
+        ${recent.length ? recent.map(it => `<div class="overview-item"><span>${esc(it.home)} – ${esc(it.away)}</span><span class="res">${it.outcome.status === 'draw' ? `${it.outcome.setsHome}:${it.outcome.setsAway}` : it.outcome.setsHome + ':' + it.outcome.setsAway} ${setDetail(it.sets)}</span></div>`).join("") : `<p class="empty-note">Noch keine Ergebnisse eingetragen.</p>`}
+      </div>
+      ${renderSponsorArea()}
     </div>`;
 }
 
@@ -668,13 +722,12 @@ function renderKoCardReadonly(id, resolved) {
 }
 
 function renderAlle(data) {
-  const { flatGamesA, flatGamesB, resolved } = data;
+  const { groupSchedule, resolved, gameNumbers } = data;
   const rows = [];
-  flatGamesA.forEach(g => rows.push({ phase: fieldLabel("A"), home: teamsById()[g.home].name, away: teamsById()[g.away].name, outcome: matchOutcome(getSets(state.groupResults[g.id]), true) }));
-  flatGamesB.forEach(g => rows.push({ phase: fieldLabel("B"), home: teamsById()[g.home].name, away: teamsById()[g.away].name, outcome: matchOutcome(getSets(state.groupResults[g.id]), true) }));
+  groupSchedule.forEach(g => rows.push({ id: g.id, phase: g.field, home: teamsById()[g.home].name, away: teamsById()[g.away].name, outcome: matchOutcome(getSets(state.groupResults[g.id]), true) }));
   KO_GAMES.forEach(g => {
     const r = resolved[g.id];
-    rows.push({ phase: g.phase, home: r.home ? r.home.name : sourceLabel(g.home), away: r.away ? r.away.name : sourceLabel(g.away), outcome: r.outcome });
+    rows.push({ id: g.id, phase: g.phase, home: r.home ? r.home.name : sourceLabel(g.home), away: r.away ? r.away.name : sourceLabel(g.away), outcome: r.outcome });
   });
   function outcomeText(o) {
     if (o.status === "win") return `${o.setsHome}:${o.setsAway}`;
@@ -684,8 +737,8 @@ function renderAlle(data) {
     return "–:–";
   }
   const done = rows.filter(g => g.outcome.status === "win" || g.outcome.status === "draw").length;
-  return `<p class="sub" style="margin-bottom:14px">${done} von ${rows.length} Spielen eingetragen</p><table class="allgames"><thead><tr><th>Phase</th><th>Begegnung</th><th>Sätze</th></tr></thead><tbody>` +
-    rows.map(g => `<tr><td style="color:var(--sub)">${esc(g.phase)}</td><td>${esc(g.home)} <span style="color:var(--sub)">–</span> ${esc(g.away)}</td>
+  return `<p class="sub" style="margin-bottom:14px">${done} von ${rows.length} Spielen eingetragen</p><table class="allgames"><thead><tr><th>Nr.</th><th>Phase</th><th>Begegnung</th><th>Sätze</th></tr></thead><tbody>` +
+    rows.map(g => `<tr><td class="mono">${gameNumbers[g.id]}</td><td style="color:var(--sub)">${esc(g.phase)}</td><td>${esc(g.home)} <span style="color:var(--sub)">–</span> ${esc(g.away)}</td>
       <td class="mono" style="font-weight:600">${outcomeText(g.outcome)}</td></tr>`).join("") +
     `</tbody></table>`;
 }
@@ -860,7 +913,11 @@ function render() {
     </div>
     <div class="tabs">${tabs.map(([id, label]) => `<button class="tab-btn ${state.tab === id ? 'active' : ''}" onclick="setTab('${id}')">${label}</button>`).join("")}</div>
     ${content}
+    <div class="site-footer">
+      <button class="footer-link" onclick="openLegal('impressum')">Impressum</button> · <button class="footer-link" onclick="openLegal('datenschutz')">Datenschutz</button>
+    </div>
     ${renderModal()}
+    ${renderLegalModal()}
   `;
 }
 
@@ -929,16 +986,9 @@ function generateRefereePdf() {
   if (!window.jspdf) { alert("PDF-Bibliothek konnte nicht geladen werden (keine Internetverbindung?)."); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const teamsA = getTeamsByGroup("A"), teamsB = getTeamsByGroup("B");
-  const roundsA = generateRoundRobin(teamsA.map(t => t.id));
-  const roundsB = generateRoundRobin(teamsB.map(t => t.id));
+  const data = buildTournamentData();
   const tById = teamsById();
-  const games = [];
-  const maxRounds = Math.max(roundsA.length, roundsB.length);
-  for (let r = 0; r < maxRounds; r++) {
-    if (roundsA[r]) roundsA[r].forEach(pair => games.push({ field: "Feld 1", home: tById[pair[0]].name, away: tById[pair[1]].name }));
-    if (roundsB[r]) roundsB[r].forEach(pair => games.push({ field: "Feld 2", home: tById[pair[0]].name, away: tById[pair[1]].name }));
-  }
+  const games = data.groupSchedule.map(g => ({ number: data.gameNumbers[g.id], field: g.field, home: tById[g.home].name, away: tById[g.away].name }));
 
   const marginX = 40;
   const perPage = 4;
@@ -949,7 +999,7 @@ function generateRefereePdf() {
     if (count === perPage) { doc.addPage(); y = 40; count = 0; }
     doc.setFontSize(10);
     doc.setFont(undefined, "bold");
-    doc.text(g.field, marginX, y);
+    doc.text(`Spiel ${g.number} · ${g.field}`, marginX, y);
 
     const body = [
       [{ content: "1", rowSpan: 2 }, g.home, "", "", "", "", "", ""],
